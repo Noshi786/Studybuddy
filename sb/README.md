@@ -4,12 +4,12 @@ Upload .md / .docx / .pdf, ask questions, get answers with expandable citations.
 Settings: top-k, similarity threshold, semantic or hybrid search. A debug panel shows similarity scores.
 
 ## Pipeline
-upload -> parse (Unstructured for DOCX/Markdown; pypdf for selectable PDF text) ->
+upload -> parse (pypdf for selectable PDF text; python-docx for DOCX; UTF-8 for Markdown) ->
 chunk (LangChain RecursiveCharacterTextSplitter: 700 chars, 100 overlap) ->
 embed (Pinecone inference, e5-large) -> Pinecone index -> query embedding -> semantic (+ BM25 for hybrid) ->
 top-k + threshold -> LangChain prompt/model chain (Groq, optional Anthropic) -> answer with [n] citations
 
-The deployment branch does not run OCR, so scanned/image-only PDFs need the local `tesseract-local` branch.
+The deployment branch uses lightweight parsers and does not run OCR, so scanned/image-only PDFs need the local `tesseract-local` branch.
 
 ## Frontend
 The frontend is split by responsibility:

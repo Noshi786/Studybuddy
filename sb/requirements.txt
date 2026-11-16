@@ -10,5 +10,5 @@ langchain-core
 langchain-text-splitters
 langchain-groq
 langchain-anthropic
-unstructured[docx,md]
 pypdf
+python-docx

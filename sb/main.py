@@ -7,13 +7,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pinecone import Pinecone, ServerlessSpec
 from rank_bm25 import BM25Okapi
+from docx import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
-from unstructured.partition.docx import partition_docx
-from unstructured.partition.md import partition_md
-from unstructured.partition.text import partition_text
 
 # ---------- setup ----------
 INDEX_NAME, NS, DIM = "studybuddy", "docs", 1024          # 1024 = multilingual-e5-large
@@ -66,27 +64,17 @@ def parse(name, data):                                    # -> [(page, text)]
             )
         return pages
     if ext == "docx":
-        elements = partition_docx(file=io.BytesIO(data))
-    elif ext == "md":
-        elements = partition_md(text=data.decode("utf-8", "ignore"))
-    elif ext == "txt":
-        elements = partition_text(text=data.decode("utf-8", "ignore"))
+        text = "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
+    elif ext in {"md", "txt"}:
+        text = data.decode("utf-8", "ignore")
     else:
         raise HTTPException(status_code=415, detail="Supported formats are PDF, DOCX, Markdown, and TXT.")
 
-    pages = {}
-    for element in elements:
-        text = element.text.strip()
-        if not text:
-            continue
-        page_number = getattr(element.metadata, "page_number", None)
-        page = int(page_number) if page_number else 1
-        pages.setdefault(page, []).append(text)
-
-    if not pages:
+    text = text.strip()
+    if not text:
         raise HTTPException(status_code=422, detail="No readable text found in this document.")
 
-    return [(page, "\n".join(texts)) for page, texts in sorted(pages.items())]
+    return [(1, text)]
 
 def chunk(text):
     text = re.sub(r"\s+", " ", text).strip()
