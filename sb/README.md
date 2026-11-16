@@ -4,10 +4,12 @@ Upload .md / .docx / .pdf, ask questions, get answers with expandable citations.
 Settings: top-k, similarity threshold, semantic or hybrid search. A debug panel shows similarity scores.
 
 ## Pipeline
-upload -> parse (pypdf / python-docx; scanned PDF pages use Tesseract OCR via PyMuPDF and Pillow) ->
+upload -> parse (Unstructured for DOCX/Markdown; pypdf for selectable PDF text) ->
 chunk (LangChain RecursiveCharacterTextSplitter: 700 chars, 100 overlap) ->
 embed (Pinecone inference, e5-large) -> Pinecone index -> query embedding -> semantic (+ BM25 for hybrid) ->
 top-k + threshold -> LangChain prompt/model chain (Groq, optional Anthropic) -> answer with [n] citations
+
+The deployment branch does not run OCR, so scanned/image-only PDFs need the local `tesseract-local` branch.
 
 ## Frontend
 The frontend is split by responsibility:
@@ -22,6 +24,6 @@ FastAPI serves the HTML and static assets from the `frontend` directory.
 ## Run
 1. `pip install -r requirements.txt`
 2. Copy `.env.example` to `.env` and paste your `PINECONE_API_KEY` and `GROQ_API_KEY` (or ANTHROPIC_API_KEY with LLM_PROVIDER=anthropic)
-3. Install the Tesseract OCR engine separately and ensure `tesseract.exe` is on PATH. Set `TESSERACT_CMD` in `.env` if it is installed elsewhere; `TESSERACT_LANG` defaults to `eng`.
+3. This deployment branch extracts selectable PDF text and does not run OCR. For scanned PDFs, switch to the local `tesseract-local` branch and install the Tesseract OCR engine separately.
 4. `uvicorn main:app --host 0.0.0.0 --port 8000`
 5. Open http://localhost:8000

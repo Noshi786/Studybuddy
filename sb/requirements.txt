@@ -2,8 +2,6 @@ fastapi
 uvicorn[standard]
 python-multipart
 pinecone
-pypdf
-python-docx
 rank_bm25
 anthropic
 python-dotenv
@@ -12,6 +10,5 @@ langchain-core
 langchain-text-splitters
 langchain-groq
 langchain-anthropic
-Pillow
-pytesseract
-pymupdf
+unstructured[docx,md]
+pypdf

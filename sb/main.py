@@ -10,11 +10,10 @@ from rank_bm25 import BM25Okapi
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from PIL import Image
 from pypdf import PdfReader
-from docx import Document
-import pymupdf
-import pytesseract
+from unstructured.partition.docx import partition_docx
+from unstructured.partition.md import partition_md
+from unstructured.partition.text import partition_text
 
 # ---------- setup ----------
 INDEX_NAME, NS, DIM = "studybuddy", "docs", 1024          # 1024 = multilingual-e5-large
@@ -51,44 +50,43 @@ def save(): json.dump(DB, open(DATA_FILE, "w"))
 # ---------- helpers ----------
 tok = lambda s: re.findall(r"[a-z0-9]+", s.lower())
 splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=100)
-OCR_LANG = os.getenv("TESSERACT_LANG", "eng")
-if os.getenv("TESSERACT_CMD"):
-    pytesseract.pytesseract.tesseract_cmd = os.environ["TESSERACT_CMD"]
 
 def parse(name, data):                                    # -> [(page, text)]
     ext = name.rsplit(".", 1)[-1].lower()
     if ext == "pdf":
-        pages = []
-        rendered_pdf = None
-        try:
-            for i, page in enumerate(PdfReader(io.BytesIO(data)).pages):
-                text = page.extract_text() or ""
-                if not text.strip():
-                    if rendered_pdf is None:
-                        rendered_pdf = pymupdf.open(stream=data, filetype="pdf")
-                    pix = rendered_pdf.load_page(i).get_pixmap(
-                        dpi=200, colorspace=pymupdf.csRGB, alpha=False
-                    )
-                    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                    try:
-                        text = pytesseract.image_to_string(image, lang=OCR_LANG)
-                    except pytesseract.TesseractNotFoundError as e:
-                        raise HTTPException(
-                            status_code=503,
-                            detail="Tesseract OCR is not installed or not on PATH. Install Tesseract or set TESSERACT_CMD.",
-                        ) from e
-                    except pytesseract.TesseractError as e:
-                        raise HTTPException(
-                            status_code=422, detail=f"Tesseract OCR failed: {e}"
-                        ) from e
-                pages.append((i + 1, text))
-            return pages
-        finally:
-            if rendered_pdf is not None:
-                rendered_pdf.close()
+        pages = [
+            (i + 1, text)
+            for i, page in enumerate(PdfReader(io.BytesIO(data)).pages)
+            if (text := (page.extract_text() or "").strip())
+        ]
+        if not pages:
+            raise HTTPException(
+                status_code=422,
+                detail="No selectable text found in this PDF. Scanned PDFs require OCR; use the local Tesseract branch.",
+            )
+        return pages
     if ext == "docx":
-        return [(1, "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs))]
-    return [(1, data.decode("utf-8", "ignore"))]          # .md / .txt
+        elements = partition_docx(file=io.BytesIO(data))
+    elif ext == "md":
+        elements = partition_md(text=data.decode("utf-8", "ignore"))
+    elif ext == "txt":
+        elements = partition_text(text=data.decode("utf-8", "ignore"))
+    else:
+        raise HTTPException(status_code=415, detail="Supported formats are PDF, DOCX, Markdown, and TXT.")
+
+    pages = {}
+    for element in elements:
+        text = element.text.strip()
+        if not text:
+            continue
+        page_number = getattr(element.metadata, "page_number", None)
+        page = int(page_number) if page_number else 1
+        pages.setdefault(page, []).append(text)
+
+    if not pages:
+        raise HTTPException(status_code=422, detail="No readable text found in this document.")
+
+    return [(page, "\n".join(texts)) for page, texts in sorted(pages.items())]
 
 def chunk(text):
     text = re.sub(r"\s+", " ", text).strip()
