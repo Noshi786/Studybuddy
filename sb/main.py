@@ -1,7 +1,7 @@
 import os, io, re, uuid
 from dotenv import load_dotenv
 load_dotenv()                                             # reads keys from the .env file
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 # ---------- setup ----------
-INDEX_NAME, NS, REG_NS, DIM = "studybuddy", "docs", "registry", 1024   # 1024 = multilingual-e5-large
+INDEX_NAME, DIM = "studybuddy", 1024                      # 1024 = multilingual-e5-large
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(name=INDEX_NAME, dimension=DIM, metric="cosine",
@@ -44,6 +44,13 @@ answer_chain = (
 
 # NOTE: no local data.json any more (Vercel's filesystem is read-only).
 # The document list lives in Pinecone, in a separate "registry" namespace.
+
+# ---------- per-user isolation ----------
+def namespaces(client_id):
+    """Each browser sends a random X-Client-Id; its documents live in their own Pinecone namespaces."""
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,64}", client_id or ""):
+        raise HTTPException(status_code=400, detail="Missing or invalid X-Client-Id header.")
+    return f"docs-{client_id}", f"reg-{client_id}"
 
 # ---------- helpers ----------
 tok = lambda s: re.findall(r"[a-z0-9]+", s.lower())
@@ -93,7 +100,8 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.post("/api/documents")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), x_client_id: str = Header(None)):
+    NS, REG_NS = namespaces(x_client_id)
     data = await file.read()
     doc_id, chunks = uuid.uuid4().hex[:8], []
     for page, text in parse(file.filename, data):
@@ -114,13 +122,15 @@ async def upload(file: UploadFile = File(...)):
     return {"id": doc_id, "chunks": len(chunks)}
 
 @app.get("/api/documents")
-def documents():
+def documents(x_client_id: str = Header(None)):
+    NS, REG_NS = namespaces(x_client_id)
     res = index.query(vector=DUMMY, top_k=1000, include_metadata=True, namespace=REG_NS)
     return [{"id": m["id"], "name": m["metadata"]["name"], "type": m["metadata"]["type"],
              "chunk_count": int(m["metadata"]["chunk_count"])} for m in res["matches"]]
 
 @app.delete("/api/documents/{doc_id}")
-def delete(doc_id: str):
+def delete(doc_id: str, x_client_id: str = Header(None)):
+    NS, REG_NS = namespaces(x_client_id)
     got = index.fetch(ids=[doc_id], namespace=REG_NS)
     rec = got.vectors.get(doc_id) if hasattr(got, "vectors") else None
     if rec:
@@ -138,7 +148,8 @@ class Q(BaseModel):
     mode: str = "hybrid"                                  # "semantic" | "hybrid"
 
 @app.post("/api/query")
-def query(q: Q):
+def query(q: Q, x_client_id: str = Header(None)):
+    NS, REG_NS = namespaces(x_client_id)
     # 1) semantic search in Pinecone
     qv = embed([q.question], "query")[0]
     res = index.query(vector=qv, top_k=max(q.top_k * 4, 20), include_metadata=True, namespace=NS)

@@ -1,17 +1,39 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    />
-    <title>StudyBuddy | Learn from your own notes</title>
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap"
-    />
-    <link rel="stylesheet" href="/css/styles.css" />
+      <link rel="stylesheet" href="/css/styles.css" />
+
+    <script>
+      (function () {
+        var id = localStorage.getItem("sb_client_id");
+        if (!id) {
+          id = window.crypto && crypto.randomUUID
+            ? crypto.randomUUID()
+            : Date.now().toString(16) + Math.random().toString(16).slice(2) + "00000000";
+          localStorage.setItem("sb_client_id", id);
+        }
+        var origFetch = window.fetch;
+        window.fetch = function (input, init) {
+          try {
+            var raw = typeof input === "string" ? input
+                    : input instanceof URL ? input.href : input.url;
+            var u = new URL(raw, location.href);
+            if (u.origin === location.origin && u.pathname.indexOf("/api/") === 0) {
+              if (input instanceof Request) {
+                var h1 = new Headers(input.headers);
+                h1.set("X-Client-Id", id);
+                input = new Request(input, { headers: h1 });
+              } else {
+                init = init || {};
+                var h2 = new Headers(init.headers || {});
+                h2.set("X-Client-Id", id);
+                init.headers = h2;
+              }
+            }
+          } catch (e) {}
+          return origFetch.call(this, input, init);
+        };
+      })();
+    </script>
   </head>
   <body>
     <nav>
